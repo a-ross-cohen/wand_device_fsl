@@ -52,9 +52,12 @@ PRODUCT_COPY_FILES += \
 endif
 
 PRODUCT_COPY_FILES += \
-	device/fsl/wandboard/firmware/brcm/brcmfmac-sdio.bin:system/etc/firmware/brcm/bcm4329_fw.bin \
-	device/fsl/wandboard/firmware/brcm/brcmfmac-sdio.txt:system/etc/firmware/brcm/bcm4329_nvram.txt \
+	device/fsl/wandboard/firmware/brcm/bcm4329_fw.bin:system/etc/firmware/brcm/bcm4329_fw.bin \
+	device/fsl/wandboard/firmware/brcm/bcm4329_nvram.txt:system/etc/firmware/brcm/bcm4329_nvram.txt \
 	device/fsl/wandboard/firmware/brcm/bcm4329.hcd:system/etc/firmware/brcm/BCM4329B1.hcd \
+	device/fsl/wandboard/firmware/brcm/bcm4330_fw.bin:system/etc/firmware/brcm/bcm4330_fw.bin \
+	device/fsl/wandboard/firmware/brcm/bcm4330_nvram.txt:system/etc/firmware/brcm/bcm4330_nvram.txt \
+	device/fsl/wandboard/firmware/brcm/bcm4330.hcd:system/etc/firmware/brcm/BCM4330B1.hcd \
 	device/fsl/wandboard/rc.wifi:system/bin/wifi/rc.wifi
 
 PRODUCT_COPY_FILES += \
