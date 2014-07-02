@@ -1,0 +1,204 @@
+#!/bin/bash
+
+error() {
+    echo "!   $1"
+}
+
+unmount() {
+    diskutil unmountDisk $disk >/dev/null
+}
+
+eject() {
+    unmount
+    diskutil eject $disk
+}
+
+mb_to_sectors() {
+    expr $1 \* $sectors_per_megabyte
+}
+
+calculate_geometry() {
+    block_size=`diskutil info $disk | grep "Block Size" | grep -oE "\d+"`
+    sectors_per_megabyte=`expr 1048576 / $block_size`
+    sectors=`fdisk $disk | grep -oE 'geometry.*\[\d+' | grep -oE '\[\d+' | grep -oE '\d+'`
+    megabytes=`expr $sectors / $sectors_per_megabyte`
+}
+
+calculate_partition_sizes() {
+    # partition sizes, all but data are static
+    bootloader_mb=40
+    boot_mb=40
+    recovery_mb=40
+    system_mb=512
+    cache_mb=512
+    vendor_mb=20
+    misc_mb=20
+    data_mb=`expr $megabytes - $bootloader_mb - $boot_mb - $recovery_mb - $system_mb - $cache_mb - $vendor_mb - $misc_mb`
+    bootloader_sectors=`mb_to_sectors $bootloader_mb`
+    boot_sectors=`mb_to_sectors $boot_mb`
+    recovery_sectors=`mb_to_sectors $recovery_mb`
+    system_sectors=`mb_to_sectors $system_mb`
+    cache_sectors=`mb_to_sectors $cache_mb`
+    vendor_sectors=`mb_to_sectors $vendor_mb`
+    misc_sectors=`mb_to_sectors $misc_mb`
+    data_sectors=`mb_to_sectors $data_mb`
+    mbr_one_sectors=`expr $sectors - $bootloader_sectors - $boot_sectors - $recovery_sectors - $data_sectors`
+}
+
+write_partion_scheme() {
+    unmount
+    dd if=/dev/zero of=$disk bs=1m count=1
+    (
+    echo erase;
+    echo e 1;
+        echo 0C;
+        echo n;
+        echo $bootloader_sectors;
+        echo $boot_sectors;
+    echo e 2;
+        echo 83;
+        echo n;
+        echo;
+        echo $recovery_sectors;
+    echo e 3;
+        echo 05;
+        echo n;
+        echo;
+        echo $mbr_one_sectors;
+    echo e 4;
+        echo 83;
+        echo n;
+        echo;
+        echo $data_sectors
+    echo w;
+    echo select 3;
+        echo y;
+        echo erase;
+        echo e 1;
+            echo 83;
+            echo n;
+            echo;
+            echo $system_sectors
+        echo e 2;
+            echo 83;
+            echo n;
+            echo;
+            echo $cache_sectors
+        echo e 3;
+            echo 83;
+            echo n;
+            echo;
+            echo $vendor_sectors
+        echo e 4;
+            echo 83;
+            echo n;
+            echo;
+            echo $misc_sectors
+        echo w;
+        echo exit;
+    echo exit;
+    ) | fdisk -iey $disk
+    unmount
+}
+
+create_filesystems() {
+    echo y | newfs_msdos -F 32 -v imx6 ${disk}s1 
+    echo y | newfs_msdos -F 32 -v recovery ${disk}s2 
+    echo y | fuse-ext2.mke2fs -T ext4 -L cache ${disk}s6 
+    echo y | fuse-ext2.mke2fs -T ext4 -L vendor ${disk}s7 
+    echo y | fuse-ext2.mke2fs -T ext4 -L misc ${disk}s8 
+}
+
+create_data_filesystem() {
+    echo y | fuse-ext2.mke2fs -T ext4 -L data ${disk}s4 
+}
+
+burn_images() {
+    dd if=${product_directory}/boot/SPL of=$disk bs=1k seek=1 
+    dd if=${product_directory}/system.img of=${disk}s5 bs=1m 
+}
+
+arrange_boot() {
+    diskutil mount -mountPoint /Volumes/imx6 ${disk}s1
+    if [ $? ] ; then
+        mkdir -p /Volumes/imx6/boot
+        cp ${product_directory}/boot/uImage /Volumes/imx6/boot
+        cp ${product_directory}/boot/u-boot.img /Volumes/imx6/boot
+        cp ${product_directory}/boot/uEnv.txt /Volumes/imx6/boot
+        mkimage -A arm -O linux -T ramdisk -C none -a 0x10800800 -n "Android Root Filesystem" -d ${product_directory}/ramdisk.img /Volumes/imx6/boot/uramdisk.img  
+    else
+        echo "Mount Failed, exiting."
+        exit
+    fi
+}
+
+# make sure we have the minimum arguments, if not complain...
+if [ "$(id -u)" != "0" ]; then
+    error "You must sudo to run this command."
+    exit
+elif [ $# -lt 2 ] ; then
+    error "Insufficient Parameters"
+    error "Usage: $0 /dev/(r)diskN product"
+    exit
+fi
+
+disk=$1
+product=$2
+product_directory="out/target/product/$product"
+
+# make sure the disk exists
+if ! [ -e $disk ] ; then
+    error "Disk $disk does not exist. Aborting."
+fi
+
+# make sure the product exists
+if ! [ -f $product_directory/boot/u-boot.img ] ; then
+    error "$product_directory/boot/u-boot.img does not exist. Aborting."
+    exit
+elif ! [ -f $product_directory/boot/uImage ] ; then
+    error "$product_directory/boot/uImage does not exist. Aborting."
+    exit    
+elif ! [ -f $product_directory/system.img ] ; then
+    error "$product_directory/system.img does not exist. Aborting."
+    exit
+fi
+
+calculate_geometry
+calculate_partition_sizes
+
+echo "--------------------"
+echo "      disk: $disk"
+echo "   product: $product"
+echo "--------------------"
+echo "block size: $block_size bytes"
+echo "   sectors: $sectors"
+echo "total size: $megabytes megabytes"
+echo "--------------------"
+printf "%-10s -> sectors: %-10d megabytes: %-10d\n" bootloader $bootloader_sectors $bootloader_mb
+printf "%-10s -> sectors: %-10d megabytes: %-10d\n" boot $boot_sectors $boot_mb
+printf "%-10s -> sectors: %-10d megabytes: %-10d\n" recovery $recovery_sectors $recovery_mb
+printf "%-10s -> sectors: %-10d megabytes: %-10d\n" data $data_sectors $data_mb
+printf "%-10s -> sectors: %-10d megabytes: %-10d\n" system $system_sectors $system_mb
+printf "%-10s -> sectors: %-10d megabytes: %-10d\n" cache $cache_sectors $cache_mb
+printf "%-10s -> sectors: %-10d megabytes: %-10d\n" vendor $vendor_sectors $vendor_mb
+printf "%-10s -> sectors: %-10d megabytes: %-10d\n" misc $misc_sectors $misc_mb
+echo "--------------------"
+echo "writing partition scheme"
+write_partion_scheme
+echo "--------------------"
+echo "creating filesystems"
+create_filesystems
+echo "--------------------"
+echo "burning images"
+burn_images
+echo "--------------------"
+echo "arranging boot"
+arrange_boot
+echo "--------------------"
+echo "creating data filesystem"
+create_data_filesystem
+echo "--------------------"
+echo "ejecting the disk"
+eject
+echo "--------------------"
+echo "done. you may now remove the disk."

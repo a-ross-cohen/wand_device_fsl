@@ -66,3 +66,5 @@ PRODUCT_COPY_FILES += \
 PRODUCT_COPY_FILES += \
         system/bluetooth/data/main.nonsmartphone.conf:system/etc/bluetooth/main.conf
 
+PRODUCT_COPY_FILES += \
+    device/fsl/wandboard/boot/uEnv.txt:boot/uEnv.txt
